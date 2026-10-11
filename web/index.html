@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Benchmark: ЖКХ</title>
+<link href="vendor/bootstrap.min.css" rel="stylesheet">
+<link href="vendor/dataTables.bootstrap5.css" rel="stylesheet">
+<link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+<header class="hero">
+  <div class="container">
+    <div class="d-flex justify-content-between align-items-center">
+      <div class="brand">ru-prop-management-eval</div>
+      <div class="lang-switch">
+        <a class="lang-btn" href="https://github.com/toplenboren/ru-prop-management-eval" target="_blank" rel="noopener">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>GitHub
+        </a>
+        <button class="lang-btn" data-lang="en">EN</button>
+        <button class="lang-btn" data-lang="ru">RU</button>
+      </div>
+    </div>
+    <div class="hero-body text-center">
+      <h1 data-i18n="title">How do modern LLMs handle real questions from Russian property managers?</h1>
+      <p class="abstract mx-auto" data-i18n="abstract"></p>
+      <div class="sub" id="loadStatus" data-i18n="loading">loading…</div>
+    </div>
+  </div>
+</header>
+
+<div class="container-fluid px-4">
+
+  <div class="row g-3">
+  <div class="col-lg-7 mb-3"><div class="card h-100"><div class="card-body">
+    <h6 data-i18n="me.h">Как это проверяется</h6>
+    <div class="ex-q mb-3">
+      <span data-i18n="me.q">A question from the dataset:</span>
+      «<a href="#" id="exLive" data-i18n="me.qtext">Who moderates the official building chats, and what if someone posts banned content there?</a>»
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="method-tag" data-i18n="me.cb">Closed book</div>
+        <div class="fstep" data-i18n-html="me.cb1">The model gets only the question: no laws, no hints, no reference answer</div>
+        <div class="farrow">↓</div>
+        <div class="fstep" data-i18n-html="me.cb2">It answers from memory, like in a normal chat</div>
+        <div class="farrow">↓</div>
+        <div class="fstep" data-i18n-html="me.cb3">Judge jev checks the answer against the expert reference and scores it: solved, legal, facts right</div>
+      </div>
+      <div class="col-md-6">
+        <div class="method-tag oracle-tag" data-i18n="me.or">🚧 Oracle — coming soon</div>
+        <div class="oracle-flow">
+          <div class="fstep" data-i18n-html="me.or1">Relevant legal texts and similar reference answers are pulled in with the question</div>
+          <div class="farrow">↓</div>
+          <div class="fstep" data-i18n-html="me.or2">The model answers grounded in the documents, not memory</div>
+          <div class="farrow">↓</div>
+          <div class="fstep" data-i18n-html="me.or3">The same judge scores it, showing the ceiling a retrieval harness can reach</div>
+        </div>
+      </div>
+    </div>
+    <div class="small text-secondary mt-3" data-i18n="me.note">123 questions, one run per model, one judge. Numbers are preliminary: directional, not final.</div>
+  </div></div></div>
+
+  <div class="col-lg-5 mb-3"><div class="card h-100"><div class="card-body">
+    <h6 data-i18n="f.h">Main findings</h6>
+    <ul class="mb-0">
+      <li data-i18n-html="f.1">Closed-book leader: gpt-5.6-sol·nr at 52.7%. Best Russian model: GigaChat-3-Ultra at 44.9%, nearly free on its freemium quota.</li>
+      <li data-i18n-html="f.2">No model is production-ready without context: the best mean score across all questions is 52.7%. Real use needs retrieval over actual legal documents.</li>
+      <li data-i18n-html="f.3">Judges flag answers as illegal far less often than as factually wrong. The real risk is confident advice citing norms that do not exist.</li>
+      <li data-i18n-html="f.4">Reasoning adds ~2–3 points for 2–4× the tokens. The noreason variants are the cost-efficient pick.</li>
+    </ul>
+  </div></div></div>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="v" id="stModels">–</div><div class="l" data-i18n="st.models">Models</div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="v" id="stQuestions">–</div><div class="l" data-i18n="st.questions">Questions</div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="v" id="stScore">–</div><div class="l" data-i18n="st.score">Mean score</div></div></div>
+    <div class="col-6 col-md-3"><div class="stat-card"><div class="v" id="stCost">–</div><div class="l" data-i18n="st.cost">Est. total cost</div></div></div>
+  </div>
+
+  <ul class="nav nav-pills-main mb-3 d-flex">
+    <li class="nav-item"><a class="nav-link active" data-tab="models" data-i18n="tab.models">Models</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="questions" data-i18n="tab.questions">Questions</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="answers" data-i18n="tab.answers">Closed Book Answers</a></li>
+    <li class="nav-item"><a class="nav-link nav-oracle" id="tabOracle" aria-disabled="true" data-i18n="tab.oracle">🚧 Oracle Answers</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="charts" data-i18n="tab.charts">Chart builder</a></li>
+  </ul>
+
+  <section id="tab-models">
+    <div id="vendorFilter" class="mb-3 d-flex align-items-center gap-1 flex-wrap"></div>
+    <div id="podium" class="podium mb-3"></div>
+    <div class="card mb-3"><div class="card-body">
+      <table id="tblModels" class="table table-hover w-100"></table>
+      <div class="small text-secondary mt-2" data-i18n-html="note.freemium"></div>
+    </div></div>
+    <div class="row">
+      <div class="col-lg-6 mb-3"><div class="card h-100"><div class="card-body chart-box">
+        <h6><span data-i18n="ch.scoreModel">Mean score by model</span> <span class="chart-hint" data-i18n="hint.higher"></span></h6><canvas id="chScoreModel"></canvas>
+      </div></div></div>
+      <div class="col-lg-6 mb-3"><div class="card h-100"><div class="card-body chart-box">
+        <h6><span data-i18n="ch.costScore">Cost vs quality (avg per question)</span> <span class="chart-hint" data-i18n="hint.topleft"></span></h6><canvas id="chCostScore"></canvas>
+      </div></div></div>
+      <div class="col-lg-6 mb-3"><div class="card h-100"><div class="card-body chart-box">
+        <h6><span data-i18n="ch.illegal">Answers judged illegal</span> <span class="chart-hint" data-i18n="hint.lower"></span></h6><canvas id="chIllegal"></canvas>
+      </div></div></div>
+      <div class="col-lg-6 mb-3"><div class="card h-100"><div class="card-body chart-box">
+        <h6><span data-i18n="ch.facterr">Factually incorrect answers</span> <span class="chart-hint" data-i18n="hint.lower"></span></h6><canvas id="chFactErr"></canvas>
+      </div></div></div>
+    </div>
+  </section>
+
+  <section id="tab-questions" class="d-none">
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><div class="card"><div class="card-body">
+        <h6><span data-i18n="q.hardest">Hardest questions</span> <span class="chart-hint" data-i18n="hint.min"></span></h6>
+        <div id="qHardest"></div>
+      </div></div></div>
+      <div class="col-md-4"><div class="card"><div class="card-body">
+        <h6><span data-i18n="q.easiest">Easiest questions</span> <span class="chart-hint" data-i18n="hint.max"></span></h6>
+        <div id="qEasiest"></div>
+      </div></div></div>
+      <div class="col-md-4"><div class="card"><div class="card-body">
+        <h6><span data-i18n="q.shame">Suspicious answers</span> <span class="chart-hint" data-i18n="hint.shame"></span></h6>
+        <div id="qShame"></div>
+      </div></div></div>
+    </div>
+    <div class="card"><div class="card-body">
+      <table id="tblQuestions" class="table table-hover w-100"></table>
+    </div></div>
+  </section>
+
+  <section id="tab-answers" class="d-none">
+    <div class="card"><div class="card-body">
+      <div class="row g-2 mb-2 align-items-center">
+        <div class="col-auto">
+          <select id="selAnsModel" class="form-select form-select-sm"></select>
+        </div>
+        <div class="col-auto text-secondary small" id="ansHint" data-i18n="ans.hint">answers load when you pick a model</div>
+      </div>
+      <table id="tblAnswers" class="table table-hover w-100"></table>
+    </div></div>
+  </section>
+
+  <section id="tab-charts" class="d-none">
+    <div class="card mb-3"><div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-auto"><label class="form-label small mb-0" data-i18n="cb.metric">Metric</label>
+          <select id="cbMetric" class="form-select form-select-sm"></select></div>
+        <div class="col-auto"><label class="form-label small mb-0" data-i18n="cb.agg">Aggregate</label>
+          <select id="cbAgg" class="form-select form-select-sm">
+            <option value="mean" data-i18n="opt.mean">mean</option><option value="sum" data-i18n="opt.sum">sum</option>
+            <option value="min" data-i18n="opt.min">min</option><option value="max" data-i18n="opt.max">max</option><option value="count" data-i18n="opt.count">count</option>
+          </select></div>
+        <div class="col-auto"><label class="form-label small mb-0" data-i18n="cb.group">Group by</label>
+          <select id="cbGroup" class="form-select form-select-sm"></select></div>
+        <div class="col-auto"><label class="form-label small mb-0" data-i18n="cb.split">Split by</label>
+          <select id="cbSplit" class="form-select form-select-sm"></select></div>
+        <div class="col-auto"><label class="form-label small mb-0" data-i18n="cb.type">Type</label>
+          <select id="cbType" class="form-select form-select-sm">
+            <option value="bar" data-i18n="opt.bar">bar</option><option value="barH" data-i18n="opt.barh">bar (horizontal)</option>
+            <option value="line" data-i18n="opt.line">line</option><option value="doughnut" data-i18n="opt.doughnut">doughnut</option>
+          </select></div>
+        <div class="col-auto"><button id="btnDraw" class="btn btn-sm btn-primary" data-i18n="cb.draw">Draw</button></div>
+      </div>
+    </div></div>
+    <div class="card"><div class="card-body" style="height:440px"><canvas id="chCustom"></canvas></div></div>
+  </section>
+</div>
+
+<footer class="site-footer">
+  <div class="container-fluid px-4" data-i18n-html="footer.legal"></div>
+</footer>
+
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="dmTitle"></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="chat-msg chat-user">
+          <div class="chat-label" data-i18n="m.question">Question</div>
+          <div id="dmQuestion" class="chat-bubble"></div>
+        </div>
+        <div class="row">
+          <div class="col-md-6">
+            <h6 data-i18n="m.expert">Expert answer</h6><p id="dmExpert" class="answer-text small border rounded p-2 bg-light"></p>
+          </div>
+          <div class="col-md-6">
+            <h6 data-i18n="m.rubric">Rubric</h6><div id="dmRubric" class="answer-text small border rounded p-2 bg-light"></div>
+          </div>
+        </div>
+        <hr>
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-auto"><label class="form-label small mb-0" data-i18n="m.model">Model</label>
+            <select id="dmModel" class="form-select form-select-sm"></select></div>
+          <div class="col small" id="dmScoreChips"></div>
+        </div>
+        <div class="chat-msg chat-model">
+          <div class="chat-label"><span data-i18n="m.answer">Model answer</span> · <span id="dmChatModel"></span></div>
+          <div id="dmAnswer" class="chat-bubble answer-text"></div>
+        </div>
+        <h6 data-i18n="m.criteria">Scores</h6>
+        <div class="small text-secondary mb-2"><span data-i18n="m.judge">judge</span> · <span id="dmJudge">—</span></div>
+        <div class="small fw-semibold mb-1" data-i18n="m.flags">Answer flags</div>
+        <div id="dmFlags" class="mb-3"></div>
+        <div class="small fw-semibold mb-1" data-i18n="m.quality">Answer quality</div>
+        <table id="dmCriteria" class="table table-sm table-bordered w-100"></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="vendor/bootstrap.bundle.min.js"></script>
+<script src="vendor/jquery-3.7.1.min.js"></script>
+<script src="vendor/dataTables.js"></script>
+<script src="vendor/dataTables.bootstrap5.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/marked.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

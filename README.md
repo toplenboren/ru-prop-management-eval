@@ -1,71 +1,103 @@
 # Russian Property Management LLM Benchmark
 
-This project is a scaffold for running experiments and evaluating LLMs on a curated set of real life russian questions about property management
+This project is a toolkit for running experiments and evaluating LLMs on a curated set of real life questions about property management in Russia
 
 ## Questions:
 
-1. Which LLMs are best on a closed book (without any additional context) evaluation?
-2. If we were to provide all legal documents for each question. How would we increatse accuracy?
-3. Which harness should we build to increase accuracy?
+1. Which LLMs are best on a closed book (without any additional context) evaluation? Which are the most cost effective? Which can be used with the least amount of legal risk (i.e. are not giving malicious advice)?
+2. How should we use LLMs? Which harnesses should we build? To increase accuracy. What is the expected maximum accuracy we can achieve if we use oracle style evaluation?
 
 ## Methodology
 
 ### Dataset
 
-- **Source**: Real questions from practicing propety managers taken from curated chats and communities, All questions are vetted and answered by a practicing industry expert with 10+ yrs of experience.
-- **Size**: 100–150 questions target; 50-question pilot for the MVP. Note that at the time only 8 questions are included in the public sample — see `data/dataset.sample.tsv`.
-- **Vetting protocol**: each question has an expert reference answer + a point-weighted rubric (criterion lines)
-- **Language**: Russian (questions and reference answers).
+- **Source**: Real questions from practicing propety managers taken from curated chats and communities. All questions are vetted and answered by an industry expert.
+- **Size**: 130 questions – see `data/dataset.tsv`.
+- **Vetting protocol**: each question has an expert reference answer + a point-weighted rubric validated by expert.
+- **Classification**: each question is classified by domain, intent and whether practical experience is required to give a good answer, or just following Russian law gives an adequate answer.
+
+### LLM Runner
+
+Different libraries are used to make calls to LLM:
+- `openai` for OpenAI compatible APIs
+- `gigachat` for Gigachat family of models
+
+See `src/llm.py` for reference
+
+Models are configured in `llms_config.jsonl`
+
+### Judge runner
+
+Judges are configured in `judges.jsonl`.
 
 ### Closed book evaluation
 
-1. Take all questions from dataset and run all models listed in `llms_config.jsonl` against them. All questions are ran with the same system prompt (`prompts/system.txt`) and without any additional context. This simulates a user going to a ChatGPT-style interface and asking the LLM. Thinking, temperature and other params are configured per model.
-2. Run judge (config specified in `judges.jsonl`, prompt in `prompts/judge.txt`) against the model answers. The judge scores each answer on a two-layer rubric:
-   - **Fixed dimensions** (5 pts, same for all questions): legal grounding (2), completeness (1), actionability (1), confidence (1).
-   - **Question-specific factual criteria** (5 pts, normalized from per-question rubric): original expert-defined criteria, normalized to a fixed 5-pt scale so scores are comparable across questions.
-   - **Total: 10 pts per question.** The judge also flags hallucinations (cited laws/articles that don't exist or are wrong).
-3. Aggregate grades with `src/combine_results.py` (produces `results/grades_raw.tsv` and `results/grades.tsv`), then analyze with `src/analyze_results.py` or `src/analyze_results.ipynb`. Results are compared on: overall score (% of max), per-category breakdown, score distribution, hallucination rate, token cost, and latency.
+1. Run all models listed in `llms_config.jsonl` against each question from `data/dataset.tsv` N times. All questions are ran with the same system prompt (`prompts/system.txt`) and without any additional context. This simulates a user going to a ChatGPT-style interface and asking the LLM. Thinking, and other params are configured per model in `llms_config.jsonl`.
+
+2. Firstly, run judge: config is in `judges.jsonl`, prompt is in `prompts/judge.txt`. After running, score each answer on a two-layer rubric:
+    1. **Question-specific criteria** (5 pts, normalized from per-question `dynamic_rubric`): How good is the answer? Does in include necessary details? This score is different for each item in `data/dataset.tsv`
+    2. **Flags** 
+    - `task_completion` — the answer addresses the question at all
+    - `legality` — the advice complies with Russian Federation law and is safe to follow;
+    - `factual_correctness` — the answer cites real laws/facts (false = hallucinated).
+
+    Good answer is `legal`, `factually_correct`, `completes the task` and ticks all the boxes of "Good Answer" criteria of each question
+
+3. Aggregate and combine grades
 
 ## Results
 
-Current closed-book results (52 questions, judged by `qwen3.6-35b-a3b`, run 0):
+> **Preliminary results** — single run per question, single deterministic judge (jev), provisional pricing for some providers. Treat as directional, not final.
 
-| Model | Score | Pct | 95% CI | Tokens | Cost ($) | Halluc | N |
-|---|---|---|---|---|---|---|---|
-| GigaChat-3-Ultra | 110/260 | 42.5% | 33.3–59.5% | 54,873 | 0.00 | 2 | 52 |
-| qwen3.6-35b-a3b | 89/235 | 37.9% | 27.0–53.7% | 201,620 | 7.88 | 5 | 48 |
-| gemma-4-31b | 69/260 | 26.5% | 16.8–40.3% | 103,420 | 3.57 | 5 | 52 |
-| GigaChat-3-Pro | 59/242 | 24.4% | 10.0–31.4% | 92,547 | 46.27 | 6 | 49 |
-| GigaChat-2-Pro | 58/260 | 22.5% | 12.2–34.0% | 31,937 | 15.97 | 15 | 52 |
-| GigaChat-2-Max | 56/255 | 22.2% | 12.5–34.6% | 21,231 | 13.80 | 7 | 51 |
-| gpt-oss-120b | 58/260 | 22.1% | 12.2–34.0% | 132,839 | 2.50 | 27 | 52 |
-| yandexgpt-5.1 | 50/260 | 19.4% | 8.0–27.5% | 21,330 | 8.53 | 5 | 52 |
-| GigaChat-2 | 38/254 | 15.0% | 6.8–25.7% | 31,958 | 2.08 | 13 | 51 |
-| yandexgpt-lite | 32/260 | 12.3% | 5.4–23.0% | 22,893 | 4.58 | 8 | 52 |
+Closed-book evaluation, 123 questions, judged by jev (deterministic typed judge, 1 run per answer). Scores are % of rubric points awarded.
 
-**Key findings:**
-- **GigaChat-3-Ultra** – a Frontier Russian LLM leads at 42.5%, with the lowest hallucination rate (3.8%)
-– **Yandexgpt** – another Frontier Russian LLM was worse on almost all occasions
-- **gpt-oss-120b** has the highest hallucination rate (51.9%) — it invents legal citations in over half of answers.
-- Even frontier **LLMs can not be trusted** running closed book style
+### Main findings
 
-### Overall scores
+- **For closed-book use, pick a cheap frontier model or the best GigaChat.** `gpt-5.6-sol·nr` leads at 52.7%; `GigaChat-3-Ultra` is the best Russian model at 44.9% — and was effectively free under its freemium quota.
+- **No model is production-ready closed-book.** Best score is ~53%; a harness (retrieval over real legal docs / expert references) is needed for production use.
+- **Models are good at safe-ish answers** — legality scores are consistently higher than factual correctness. The risk is confident-sounding advice built on wrong citations, not overtly illegal suggestions.
+- **Reasoning buys ~2-3 points for 2-4× the tokens** — noreason variants are the cost-efficient pick.
 
-![Overall scores](results/figures/closedbook_overall_scores.png)
+| Model | Score | Illegal answers | Factually incorrect | ₽/question |
+|---|---|---|---|---|
+| openrouter-gpt-5.6-sol·nr | **52.7%** | 2 | 7 | 1.15₽ |
+| GigaChat-3-Ultra | 44.9% | 20 | 20 | 0.00₽* |
+| openrouter-gpt-6-luna | 44.7% | 4 | 4 | 0.11₽ |
+| openrouter-gpt-6-luna·nr | 42.5% | 5 | 9 | 0.04₽ |
+| openrouter-claude-haiku-5.5 | 41.7% | 3 | 10 | 0.15₽ |
+| qwen3.6-35b-a3b | 40.6% | 15 | 34 | 0.16₽ |
+| openrouter-claude-haiku-5.5·nr | 39.9% | 5 | 14 | 0.06₽ |
+| gemma-4-31b | 38.2% | 18 | 24 | 0.07₽ |
+| qwen3.6-fp8·nr | 38.0% | 23 | 51 | 0.08₽ |
+| qwen3.6-35b-a3b·nr | 37.4% | 24 | 51 | 0.07₽ |
+| gemma-4-31b·nr | 36.7% | 19 | 29 | 0.04₽ |
+| qwen3.8-27b·nr | 33.6% | 26 | 50 | 0.24₽ |
+| GigaChat-3-Pro | 33.5%* | 28 | 35 | 0.92₽ |
+| GigaChat-2-Max | 26.5% | 35 | 57 | 0.25₽ |
+| GigaChat-2-Pro | 26.1% | 35 | 63 | 0.29₽ |
+| GigaChat-2 | 21.7% | **50** | **88** | 0.04₽ |
+| yandexgpt-5.1 | 21.6% | 28 | 30 | 0.32₽ |
+| yandexgpt-lite | 18.0% | 39 | 54 | 0.08₽ |
 
-### Score distribution
+Counts are out of 123 questions. *GigaChat-3-Ultra cost = 0 under freemium quota; GigaChat-3-Pro is n=116 (7 questions lost to rate limits). OpenRouter costs converted at 85₽/USD.
 
-![Score distribution](results/figures/closedbook_score_distribution.png)
+### Answer quality by model
 
-### Category heatmap
+![Answer quality](results/figures/top_scores.png)
 
-![Category heatmap](results/figures/closedbook_category_heatmap.png)
+### Model families: open weights vs Russian vs US closed
 
-### Hallucinations
+![Families](results/figures/top_family.png)
 
-![Hallucinations](results/figures/closedbook_hallucinations.png)
+### Quality vs cost
 
-## Reproduce
+![Quality vs cost](results/figures/top_score_vs_cost.png)
+
+### Legality ranking
+
+![Legality](results/figures/top_legality.png)
+
+## Reproduce results:
 
 ### Prerequisites
 
@@ -75,17 +107,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Create a `.env` at the repo root with API credentials for the providers you want to use (see `llms_config.jsonl` for which env vars each model needs):
-
-```
-OPENAI_API_KEY=...
-OPENAI_API_BASE=...
-YANDEX_API_KEY=...
-YANDEX_FOLDER_ID=...
-GIGACHAT_AUTH_KEY=...
-GIGACHAT_CLIENT_ID=...
-GIGACHAT_SECRET=...
-```
+Create a `.env` at the repo root with API credentials for the providers you want to use (see `llms_config.jsonl` for which env vars each model needs) or just ask your agent :-)
 
 ### Run the full pipeline
 
@@ -103,33 +125,10 @@ python src/combine_results.py
 python src/analyze_results.py
 ```
 
-### Notebook
-
-`src/analyze_results.ipynb` loads `results/grades.tsv` and provides interactive exploration: leaderboard, score distributions, per-category breakdowns, hardest/easiest questions, hallucination analysis.
+### Run notebook for interactive analysis
 
 ```bash
 jupyter notebook src/analyze_results.ipynb
-```
-
-## Repo layout
-
-```
-data/
-  dataset.sample.tsv        # public sample: 8 questions with rubrics and expert answers
-  LICENSE                   # dataset license (CC BY-NC-SA 4.0)
-prompts/
-  system.txt                # closed-book system prompt
-  judge.txt                 # judge prompt (two-layer rubric)
-src/
-  run.py                    # run models on dataset
-  judge.py                  # judge model answers against rubrics
-  combine_results.py        # aggregate grade JSONLs into TSVs
-  analyze_results.py        # console report + figures
-  analyze_results.ipynb     # interactive notebook analysis
-  llm.py                    # provider abstraction (OpenAI, GigaChat)
-llms_config.jsonl           # model configurations (provider, pricing, params)
-judges.jsonl                # judge configurations
-results/                    # generated TSVs and figures (regenerable, raw JSONLs gitignored)
 ```
 
 ## License

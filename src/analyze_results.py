@@ -22,11 +22,20 @@ FIGURES = RESULTS / "figures"
 GRADES_TSV = RESULTS / "grades.tsv"
 REPORT_MD = RESULTS / "report.md"
 
-COLORS = [
-    "#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c",
-    "#0891b2", "#ca8a04", "#be185d", "#4f46e5", "#65a30d",
-    "#7c2d12", "#0f766e",
-]
+COLORS = {
+    "blue": "#2563eb",
+    "red": "#dc2626",
+    "green": "#16a34a",
+    "purple": "#9333ea",
+    "orange": "#ea580c",
+    "cyan": "#0891b2",
+    "yellow": "#ca8a04",
+    "pink": "#be185d",
+    "indigo": "#4f46e5",
+    "lime": "#65a30d",
+    "brown": "#7c2d12",
+    "teal": "#0f766e",
+}
 
 
 def wilson_ci(successes, n, z=1.96):
@@ -52,22 +61,23 @@ def load_data(tsv_path):
     if not rows:
         raise SystemExit(f"No data in {tsv_path}")
 
-    # Unique harnesses
-    harnesses = sorted(set(r.get("harness", "closedbook") for r in rows))
+    # Unique (judge, harness) combinations — judges are never mixed
+    combos = sorted(set(
+        (r.get("judge", "?"), r.get("harness", "closedbook")) for r in rows
+    ))
 
-    # Group rows by harness
-    harness_rows: dict[str, list[dict]] = defaultdict(list)
+    # Group rows by (judge, harness)
+    combo_rows: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for r in rows:
-        h = r.get("harness", "closedbook")
-        harness_rows[h].append(r)
+        combo_rows[(r.get("judge", "?"), r.get("harness", "closedbook"))].append(r)
 
-    # Build per-harness data
+    # Build per-combo data
     harness_data = {}
-    for harness, hrows in harness_rows.items():
-        harness_data[harness] = _build_harness_data(hrows)
+    for combo, crows in combo_rows.items():
+        harness_data[combo] = _build_harness_data(crows)
 
     return {
-        "harnesses": harnesses,
+        "combos": combos,
         "harness_data": harness_data,
     }
 
@@ -87,12 +97,13 @@ def _build_harness_data(rows: list[dict]) -> dict:
     for r in rows:
         lookup[(r["model"], r["question_id"])] = r
 
-    # Categories and question text (from first matching row)
-    categories = np.array([""] * n_questions, dtype=object)
+    # Per-question tags and question text (from first matching row)
+    tags = {name: np.array([""] * n_questions, dtype=object) for name in ("category", "intent", "knowledge")}
     question_text = [""] * n_questions
     for r in rows:
         qi = q_idx[r["question_id"]]
-        categories[qi] = r["category"]
+        for name in tags:
+            tags[name][qi] = r.get(name, "")
         question_text[qi] = r["question"]
 
     # 2D arrays [n_models, n_questions], NaN for missing
@@ -111,11 +122,13 @@ def _build_harness_data(rows: list[dict]) -> dict:
     score_avg = make_array(lambda r: r["score_avg"])
     score_min = make_array(lambda r: r["score_min"])
     score_max = make_array(lambda r: r["score_max"])
-    halluc_avg = make_array(lambda r: r["hallucination_flag_avg"])
+    fc_avg = make_array(lambda r: r.get("factual_correctness_avg", ""))
+    legality_avg = make_array(lambda r: r.get("legality_avg", ""))
+    factual_incorrect_avg = 1 - fc_avg  # incorrect rate (NaN propagates)
     pass_avg = make_array(lambda r: r["pass_flag_avg"])
     tokens_avg = make_array(lambda r: r["total_tokens_avg"])
     cost_avg = make_array(lambda r: r["cost_avg"])
-    elapsed_avg = make_array(lambda r: r["elapsed_s_avg"])
+
     n_runs = make_array(lambda r: r["n_runs"])
 
     # Per-dimension scores (may not exist in older data)
@@ -132,15 +145,8 @@ def _build_harness_data(rows: list[dict]) -> dict:
                     arr[mi, qi] = default
         return arr
 
-    factual_avg = make_array_safe("factual_avg")
-    legal_avg = make_array_safe("legal_grounding_avg")
-    completeness_avg = make_array_safe("completeness_avg")
-    actionability_avg = make_array_safe("actionability_avg")
-    confidence_avg = make_array_safe("confidence_avg")
-
-    tool_calls = make_array_safe("tool_calls_avg")
-    tool_errors = make_array_safe("tool_errors_avg")
-    tool_latency = make_array_safe("tool_latency_s_avg")
+    criteria_avg = make_array_safe("criteria_avg")
+    task_avg = make_array_safe("task_completion_avg")  # flag rate 0–1
 
     # Per-model totals
     total_awarded = np.nansum(awarded_avg, axis=1)
@@ -149,16 +155,12 @@ def _build_harness_data(rows: list[dict]) -> dict:
     n_answered = np.sum(~np.isnan(awarded_avg), axis=1)
     total_tokens = np.nansum(tokens_avg, axis=1)
     total_cost = np.nansum(cost_avg, axis=1)
-    total_halluc = np.nansum(halluc_avg, axis=1)
-    total_tool_calls = np.nansum(tool_calls, axis=1)
-    total_tool_errors = np.nansum(tool_errors, axis=1)
-    total_tool_latency = np.nansum(tool_latency, axis=1)
+    total_factual_incorrect = np.nansum(factual_incorrect_avg, axis=1)
     # Per-dimension totals (normalize to 0-100% for comparison)
-    dim_factual = np.nanmean(factual_avg, axis=1) / 5 * 100 if np.any(~np.isnan(factual_avg)) else np.zeros(n_models)
-    dim_legal = np.nanmean(legal_avg, axis=1) / 2 * 100 if np.any(~np.isnan(legal_avg)) else np.zeros(n_models)
-    dim_completeness = np.nanmean(completeness_avg, axis=1) * 100 if np.any(~np.isnan(completeness_avg)) else np.zeros(n_models)
-    dim_actionability = np.nanmean(actionability_avg, axis=1) * 100 if np.any(~np.isnan(actionability_avg)) else np.zeros(n_models)
-    dim_confidence = np.nanmean(confidence_avg, axis=1) * 100 if np.any(~np.isnan(confidence_avg)) else np.zeros(n_models)
+    dim_criteria = np.nanmean(criteria_avg, axis=1) / 5 * 100 if np.any(~np.isnan(criteria_avg)) else np.zeros(n_models)
+    dim_task = np.nanmean(task_avg, axis=1) * 100 if np.any(~np.isnan(task_avg)) else np.zeros(n_models)
+    dim_legal = np.nanmean(legality_avg, axis=1) * 100 if np.any(~np.isnan(legality_avg)) else np.zeros(n_models)
+    dim_factcorr = np.nanmean(fc_avg, axis=1) * 100 if np.any(~np.isnan(fc_avg)) else np.zeros(n_models)
 
     # Sort by overall pct ascending
     sort_idx = np.argsort(overall_pct)
@@ -168,7 +170,6 @@ def _build_harness_data(rows: list[dict]) -> dict:
     score_avg = score_avg[sort_idx]
     score_min = score_min[sort_idx]
     score_max = score_max[sort_idx]
-    halluc_avg = halluc_avg[sort_idx]
     pass_avg = pass_avg[sort_idx]
     tokens_avg = tokens_avg[sort_idx]
     cost_avg = cost_avg[sort_idx]
@@ -179,30 +180,22 @@ def _build_harness_data(rows: list[dict]) -> dict:
     n_answered = n_answered[sort_idx]
     total_tokens = total_tokens[sort_idx]
     total_cost = total_cost[sort_idx]
-    total_halluc = total_halluc[sort_idx]
-    tool_calls = tool_calls[sort_idx]
-    tool_errors = tool_errors[sort_idx]
-    tool_latency = tool_latency[sort_idx]
-    total_tool_calls = total_tool_calls[sort_idx]
-    total_tool_errors = total_tool_errors[sort_idx]
-    total_tool_latency = total_tool_latency[sort_idx]
-    dim_factual = dim_factual[sort_idx]
+    total_factual_incorrect = total_factual_incorrect[sort_idx]
+    dim_criteria = dim_criteria[sort_idx]
+    dim_task = dim_task[sort_idx]
     dim_legal = dim_legal[sort_idx]
-    dim_completeness = dim_completeness[sort_idx]
-    dim_actionability = dim_actionability[sort_idx]
-    dim_confidence = dim_confidence[sort_idx]
+    dim_factcorr = dim_factcorr[sort_idx]
 
     return {
         "models": models,
         "questions": questions,
         "question_text": question_text,
-        "categories": categories,
+        "tags": tags,
         "awarded_avg": awarded_avg,
         "max_avg": max_avg,
         "score_avg": score_avg,
         "score_min": score_min,
         "score_max": score_max,
-        "halluc_avg": halluc_avg,
         "pass_avg": pass_avg,
         "tokens_avg": tokens_avg,
         "cost_avg": cost_avg,
@@ -213,34 +206,26 @@ def _build_harness_data(rows: list[dict]) -> dict:
         "n_answered": n_answered,
         "total_tokens": total_tokens,
         "total_cost": total_cost,
-        "total_halluc": total_halluc,
-        "dim_factual": dim_factual,
+        "total_factual_incorrect": total_factual_incorrect,
+        "dim_criteria": dim_criteria,
+        "dim_task": dim_task,
         "dim_legal": dim_legal,
-        "dim_completeness": dim_completeness,
-        "dim_actionability": dim_actionability,
-        "dim_confidence": dim_confidence,
-        "tool_calls": tool_calls,
-        "tool_errors": tool_errors,
-        "tool_latency": tool_latency,
-        "total_tool_calls": total_tool_calls,
-        "total_tool_errors": total_tool_errors,
-        "total_tool_latency": total_tool_latency,
+        "dim_factcorr": dim_factcorr,
     }
 
 
-def _report_harness(d: dict, harness: str, report: list, figures: list):
-    """Generate report sections for a single harness."""
+def _report_harness(d: dict, judge: str, harness: str, report: list, figures: list):
+    """Generate report sections for a single (judge, harness) combination."""
     models = d["models"]
     n_models = len(models)
     questions = d["questions"]
     question_text = d["question_text"]
-    categories = d["categories"]
+    categories = d["tags"]["category"]
     score_avg = d["score_avg"]
     score_min = d["score_min"]
     score_max = d["score_max"]
     awarded_avg = d["awarded_avg"]
     max_avg = d["max_avg"]
-    halluc_avg = d["halluc_avg"]
     pass_avg = d["pass_avg"]
     overall_pct = d["overall_pct"]
     total_awarded = d["total_awarded"]
@@ -248,30 +233,26 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
     n_answered = d["n_answered"]
     total_tokens = d["total_tokens"]
     total_cost = d["total_cost"]
-    total_halluc = d["total_halluc"]
-    total_tool_calls = d.get("total_tool_calls", np.zeros(n_models))
-    total_tool_errors = d.get("total_tool_errors", np.zeros(n_models))
-    total_tool_latency = d.get("total_tool_latency", np.zeros(n_models))
-    dim_factual = d.get("dim_factual", np.zeros(n_models))
+    total_factual_incorrect = d["total_factual_incorrect"]
+    dim_criteria = d.get("dim_criteria", np.zeros(n_models))
+    dim_task = d.get("dim_task", np.zeros(n_models))
     dim_legal = d.get("dim_legal", np.zeros(n_models))
-    dim_completeness = d.get("dim_completeness", np.zeros(n_models))
-    dim_actionability = d.get("dim_actionability", np.zeros(n_models))
-    dim_confidence = d.get("dim_confidence", np.zeros(n_models))
+    dim_factcorr = d.get("dim_factcorr", np.zeros(n_models))
 
-    harness_label = harness.upper() if harness else "CLOSEDBOOK"
+    harness_label = f"{judge} · {(harness or 'closedbook').upper()}"
 
     # --- Section 1: Leaderboard ---
     report.append(f"\n{'='*100}")
     report.append(f"{harness_label} — Leaderboard ({len(questions)} questions)")
     report.append(f"{'='*100}")
-    report.append(f"\n{'Model':<30} {'Score':>10} {'Pct':>7} {'95% CI':>14} {'Tokens':>10} {'Cost':>10} {'Halluc':>7} {'N':>4}")
+    report.append(f"\n{'Model':<30} {'Score':>10} {'Pct':>7} {'95% CI':>14} {'Tokens':>10} {'Cost':>10} {'FactErr':>7} {'N':>4}")
     report.append("-" * 100)
 
     for i, model in enumerate(models):
         n = int(n_answered[i])
         passes = int(np.nansum(pass_avg[i]))
         lo, hi = wilson_ci(passes, n)
-        h = int(total_halluc[i])
+        h = int(total_factual_incorrect[i])
         report.append(f"{model:<30} {f'{total_awarded[i]:.0f}/{total_max[i]:.0f}':>10} {overall_pct[i]:>6.1f}% {f'{lo*100:.1f}-{hi*100:.1f}%':>14} {int(total_tokens[i]):>10,} {total_cost[i]:>10.2f} {h:>7} {n:>4}")
 
     # --- Section 2: Score distribution ---
@@ -287,33 +268,40 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
             continue
         report.append(f"{model:<30} {np.mean(valid)*100:>6.1f}% {np.median(valid)*100:>6.1f}% {np.std(valid)*100:>6.1f}% {np.min(valid)*100:>6.1f}% {np.max(valid)*100:>6.1f}%")
 
-    # --- Section 3: Category analysis ---
-    report.append(f"\n{'='*100}")
-    report.append(f"{harness_label} — CATEGORY ANALYSIS")
-    report.append(f"{'='*100}")
-    unique_cats = sorted(set(categories))
-    header = f"\n{'Category':<20}" + "".join(f"{m:>20}" for m in models)
-    report.append(header)
-    report.append("-" * (20 + 20 * n_models))
-    cat_scores = {}
-    for cat in unique_cats:
-        mask = categories == cat
-        row = f"{cat:<20}"
-        cat_model_scores = []
-        for i in range(n_models):
-            a = np.nansum(awarded_avg[i][mask])
-            m = np.nansum(max_avg[i][mask])
-            pct = (a / m * 100) if m > 0 else 0
-            row += f"{f'{pct:.0f}%':>20}"
-            cat_model_scores.append(pct)
-        report.append(row)
-        cat_scores[cat] = np.mean(cat_model_scores)
+    # --- Section 3: Per-tag analysis (category, intent, knowledge) ---
+    unique_cats = []
+    for tag_name, tag_plural in (("category", "CATEGORIES"), ("intent", "INTENTS"), ("knowledge", "KNOWLEDGE")):
+        tag_values = d["tags"][tag_name]
+        unique_vals = sorted(v for v in set(tag_values) if v)
+        if not unique_vals:
+            continue
+        if tag_name == "category":
+            unique_cats = unique_vals
+        report.append(f"\n{'='*100}")
+        report.append(f"{harness_label} — {tag_plural} ANALYSIS")
+        report.append(f"{'='*100}")
+        header = f"\n{tag_name.capitalize():<20}" + "".join(f"{m:>20}" for m in models)
+        report.append(header)
+        report.append("-" * (20 + 20 * n_models))
+        tag_scores = {}
+        for val in unique_vals:
+            mask = tag_values == val
+            row = f"{val:<20}"
+            val_model_scores = []
+            for i in range(n_models):
+                a = np.nansum(awarded_avg[i][mask])
+                m = np.nansum(max_avg[i][mask])
+                pct = (a / m * 100) if m > 0 else 0
+                row += f"{f'{pct:.0f}%':>20}"
+                val_model_scores.append(pct)
+            report.append(row)
+            tag_scores[val] = np.mean(val_model_scores)
 
-    report.append(f"\n{'='*100}")
-    report.append(f"{harness_label} — HARDEST CATEGORIES (lowest avg score across all models)")
-    report.append(f"{'='*100}")
-    for cat, avg in sorted(cat_scores.items(), key=lambda x: x[1]):
-        report.append(f"  {cat:<20} avg={avg:>5.1f}%")
+        report.append(f"\n{'='*100}")
+        report.append(f"{harness_label} — HARDEST {tag_plural} (lowest avg score across all models)")
+        report.append(f"{'='*100}")
+        for val, avg in sorted(tag_scores.items(), key=lambda x: x[1]):
+            report.append(f"  {val:<20} avg={avg:>5.1f}%")
 
     # --- Section 4: Hardest/easiest questions ---
     report.append(f"\n{'='*100}")
@@ -346,46 +334,32 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
         q = question_text[j][:70]
         report.append(f"  {qid:<8} avg={avg:>5.1f}%  (n={n})  [{cat}]  {q}...")
 
-    # --- Section 5: Hallucinations ---
+    # --- Section 5: Factual incorrectness ---
     report.append(f"\n{'='*100}")
-    report.append(f"{harness_label} — HALLUCINATIONS")
+    report.append(f"{harness_label} — FACTUAL INCORRECTNESS")
     report.append(f"{'='*100}")
     for i, model in enumerate(models):
-        h = int(total_halluc[i])
+        h = int(total_factual_incorrect[i])
         n = int(n_answered[i])
         report.append(f"  {model:<30} {h:>3} / {n}  ({h/n*100:.1f}%)" if n else f"  {model:<30} {h:>3} / 0")
 
     # --- Section 5b: Per-dimension breakdown ---
-    if np.any(dim_factual > 0):
+    if np.any(dim_criteria > 0):
         report.append(f"\n{'='*100}")
         report.append(f"{harness_label} — PER-DIMENSION BREAKDOWN (% of max)")
         report.append(f"{'='*100}")
-        report.append(f"\n{'Model':<30} {'Factual':>8} {'Legal':>8} {'Compl':>8} {'Action':>8} {'Conf':>8}")
+        report.append(f"\n{'Model':<30} {'Criteria':>8} {'Task':>8} {'Legal':>8} {'FactCr':>8}")
         report.append("-" * 70)
         for i, model in enumerate(models):
-            report.append(f"{model:<30} {dim_factual[i]:>7.1f}% {dim_legal[i]:>7.1f}% {dim_completeness[i]:>7.1f}% {dim_actionability[i]:>7.1f}% {dim_confidence[i]:>7.1f}%")
-
-    # --- Section 6: Tool usage (only for local-docs) ---
-    if harness == "local-docs" and np.any(total_tool_calls > 0):
-        report.append(f"\n{'='*100}")
-        report.append(f"{harness_label} — TOOL USAGE")
-        report.append(f"{'='*100}")
-        report.append(f"\n{'Model':<30} {'Calls':>8} {'Errors':>8} {'Latency(s)':>10} {'Calls/Q':>10}")
-        report.append("-" * 70)
-        for i, model in enumerate(models):
-            n = int(n_answered[i])
-            calls = int(total_tool_calls[i])
-            errors = int(total_tool_errors[i])
-            latency = total_tool_latency[i]
-            calls_per_q = calls / n if n > 0 else 0
-            report.append(f"{model:<30} {calls:>8} {errors:>8} {latency:>10.1f} {calls_per_q:>10.1f}")
+            report.append(f"{model:<30} {dim_criteria[i]:>7.1f}% {dim_task[i]:>7.1f}% {dim_legal[i]:>7.1f}% {dim_factcorr[i]:>7.1f}%")
 
     report.append("")
 
     # --- Generate figures ---
     FIGURES.mkdir(parents=True, exist_ok=True)
     DPI = 200
-    colors = [COLORS[i % len(COLORS)] for i in range(n_models)]
+    palette = list(COLORS.values())
+    colors = [palette[i % len(palette)] for i in range(n_models)]
     labels = models
     x = np.arange(n_models)
 
@@ -397,8 +371,8 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
         n = int(n_answered[i])
         passes = int(np.nansum(pass_avg[i]))
         lo, hi = wilson_ci(passes, n)
-        ci_los.append(pcts[i] - lo * 100)
-        ci_his.append(hi * 100 - pcts[i])
+        ci_los.append(max(0.0, pcts[i] - lo * 100))
+        ci_his.append(max(0.0, hi * 100 - pcts[i]))
     bars = ax.bar(x, pcts, color=colors, width=0.6, edgecolor="white", linewidth=0.5)
     ax.errorbar(x, pcts, yerr=[ci_los, ci_his], fmt="none", color="black", capsize=4, linewidth=1.2)
     ax.set_xticks(x)
@@ -410,39 +384,40 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1, f"{pct:.1f}%",
                 ha="center", va="bottom", fontsize=9, fontweight="bold")
     plt.tight_layout()
-    fname = f"{harness}_overall_scores.png"
+    fname = f"{judge}_{harness}_overall_scores.png"
     plt.savefig(FIGURES / fname, dpi=DPI)
     plt.close()
     figures.append(fname)
     print(f"  saved: {FIGURES / fname}")
 
     # Fig 2: Category heatmap
-    matrix = []
-    for i in range(n_models):
-        row = []
-        for cat in unique_cats:
-            mask = categories == cat
-            a = np.nansum(awarded_avg[i][mask])
-            m = np.nansum(max_avg[i][mask])
-            row.append((a / m * 100) if m > 0 else 0)
-        matrix.append(row)
-    fig, ax = plt.subplots(figsize=(max(10, n_models * 1.2), max(5, len(unique_cats) * 0.6)), dpi=DPI)
-    im = ax.imshow(np.array(matrix).T, aspect="auto", cmap="RdYlGn", vmin=0, vmax=60)
-    ax.set_xticks(range(n_models))
-    ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=9)
-    ax.set_yticks(range(len(unique_cats)))
-    ax.set_yticklabels(unique_cats, fontsize=10)
-    for i in range(len(unique_cats)):
-        for j in range(n_models):
-            ax.text(j, i, f"{matrix[j][i]:.0f}%", ha="center", va="center", fontsize=8, color="black")
-    ax.set_title(f"{harness_label} — Score by category (%)", fontsize=13, fontweight="bold")
-    plt.colorbar(im, ax=ax, label="%", shrink=0.8)
-    plt.tight_layout()
-    fname = f"{harness}_category_heatmap.png"
-    plt.savefig(FIGURES / fname, dpi=DPI)
-    plt.close()
-    figures.append(fname)
-    print(f"  saved: {FIGURES / fname}")
+    if unique_cats:
+        matrix = []
+        for i in range(n_models):
+            row = []
+            for cat in unique_cats:
+                mask = categories == cat
+                a = np.nansum(awarded_avg[i][mask])
+                m = np.nansum(max_avg[i][mask])
+                row.append((a / m * 100) if m > 0 else 0)
+            matrix.append(row)
+        fig, ax = plt.subplots(figsize=(max(10, n_models * 1.2), max(5, len(unique_cats) * 0.6)), dpi=DPI)
+        im = ax.imshow(np.array(matrix).T, aspect="auto", cmap="RdYlGn", vmin=0, vmax=60)
+        ax.set_xticks(range(n_models))
+        ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=9)
+        ax.set_yticks(range(len(unique_cats)))
+        ax.set_yticklabels(unique_cats, fontsize=10)
+        for i in range(len(unique_cats)):
+            for j in range(n_models):
+                ax.text(j, i, f"{matrix[j][i]:.0f}%", ha="center", va="center", fontsize=8, color="black")
+        ax.set_title(f"{harness_label} — Score by category (%)", fontsize=13, fontweight="bold")
+        plt.colorbar(im, ax=ax, label="%", shrink=0.8)
+        plt.tight_layout()
+        fname = f"{judge}_{harness}_category_heatmap.png"
+        plt.savefig(FIGURES / fname, dpi=DPI)
+        plt.close()
+        figures.append(fname)
+        print(f"  saved: {FIGURES / fname}")
 
     # Fig 3: Score distribution (box plot)
     fig, ax = plt.subplots(figsize=(12, 6), dpi=DPI)
@@ -457,26 +432,81 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
     ax.axhline(y=50, color="gray", linestyle="--", alpha=0.5, label="50% threshold")
     ax.legend(fontsize=9)
     plt.tight_layout()
-    fname = f"{harness}_score_distribution.png"
+    fname = f"{judge}_{harness}_score_distribution.png"
     plt.savefig(FIGURES / fname, dpi=DPI)
     plt.close()
     figures.append(fname)
     print(f"  saved: {FIGURES / fname}")
 
-    # Fig 4: Hallucinations
+    # Fig 4: Factual incorrectness
     fig, ax = plt.subplots(figsize=(12, 5), dpi=DPI)
-    hallucs = [int(total_halluc[i]) for i in range(n_models)]
-    bars = ax.bar(x, hallucs, color=colors, width=0.6, edgecolor="white", linewidth=0.5)
+    fails = [int(total_factual_incorrect[i]) for i in range(n_models)]
+    bars = ax.bar(x, fails, color=colors, width=0.6, edgecolor="white", linewidth=0.5)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=10)
-    ax.set_ylabel("Hallucination flags", fontsize=11)
-    ax.set_title(f"{harness_label} — Hallucination count by model", fontsize=13, fontweight="bold")
-    ax.set_ylim(0, max(hallucs) * 1.25 if hallucs else 10)
-    for bar, h in zip(bars, hallucs):
+    ax.set_ylabel("Factual-correctness failures", fontsize=11)
+    ax.set_title(f"{harness_label} — Factual-correctness failures by model", fontsize=13, fontweight="bold")
+    ax.set_ylim(0, max(fails) * 1.25 if fails else 10)
+    for bar, h in zip(bars, fails):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3, str(h),
                 ha="center", va="bottom", fontsize=10, fontweight="bold")
     plt.tight_layout()
-    fname = f"{harness}_hallucinations.png"
+    fname = f"{judge}_{harness}_fact_fails.png"
+    plt.savefig(FIGURES / fname, dpi=DPI)
+    plt.close()
+    figures.append(fname)
+    print(f"  saved: {FIGURES / fname}")
+
+    # Fig 5: Flag rates (task completion, legality, factual correctness)
+    fig, ax = plt.subplots(figsize=(14, 5), dpi=DPI)
+    flags = [("Task completion", dim_task), ("Legality", dim_legal), ("Factual correctness", dim_factcorr)]
+    fw = 0.25
+    for fi, (fname_, vals) in enumerate(flags):
+        ax.bar(x + (fi - 1) * fw, vals, width=fw, label=fname_, edgecolor="white", linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=10)
+    ax.set_ylabel("% of questions", fontsize=11)
+    ax.set_ylim(0, 115)
+    ax.axhline(y=100, color="gray", linestyle="--", alpha=0.4)
+    ax.set_title(f"{harness_label} — Flag rates by model", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+    fname = f"{judge}_{harness}_flags.png"
+    plt.savefig(FIGURES / fname, dpi=DPI)
+    plt.close()
+    figures.append(fname)
+    print(f"  saved: {FIGURES / fname}")
+
+    # Fig 6: Cost & efficiency (score vs cost, cost, tokens)
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5), dpi=DPI)
+
+    ax = axes[0]
+    for i in range(n_models):
+        ax.scatter(total_cost[i], pcts[i], color=colors[i], s=60, zorder=3)
+        ax.annotate(labels[i], (total_cost[i], pcts[i]), fontsize=7,
+                    xytext=(4, 4), textcoords="offset points")
+    ax.set_xlabel("Total cost (model currency, RUB/USD mixed)", fontsize=10)
+    ax.set_ylabel("Rubric score (%)", fontsize=10)
+    ax.set_title("Score vs cost", fontsize=11, fontweight="bold")
+    ax.grid(alpha=0.3)
+
+    ax = axes[1]
+    ax.bar(x, total_cost, color=colors, width=0.6, edgecolor="white", linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
+    ax.set_ylabel("Total cost (model currency)", fontsize=10)
+    ax.set_title("Total cost per model", fontsize=11, fontweight="bold")
+
+    ax = axes[2]
+    ax.bar(x, total_tokens / 1000, color=colors, width=0.6, edgecolor="white", linewidth=0.5)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
+    ax.set_ylabel("Tokens (thousands)", fontsize=10)
+    ax.set_title("Total tokens spent", fontsize=11, fontweight="bold")
+
+    fig.suptitle(f"{harness_label} — Cost & tokens", fontsize=13, fontweight="bold")
+    plt.tight_layout()
+    fname = f"{judge}_{harness}_efficiency.png"
     plt.savefig(FIGURES / fname, dpi=DPI)
     plt.close()
     figures.append(fname)
@@ -484,13 +514,18 @@ def _report_harness(d: dict, harness: str, report: list, figures: list):
 
 
 def _report_condition_comparison(harness_data: dict, report: list):
-    """Compare closedbook, oracle, and local-docs conditions."""
+    """Compare closedbook, oracle, and local-docs conditions, per judge."""
+    for judge in sorted({j for (j, _h) in harness_data}):
+        hd = {h: harness_data[(j, h)] for (j, h) in harness_data if j == judge}
+        if len(hd) >= 2:
+            _condition_comparison_for_judge(judge, hd, report)
+
+
+def _condition_comparison_for_judge(judge: str, harness_data: dict, report: list):
     harnesses = list(harness_data.keys())
-    if len(harnesses) < 2:
-        return
 
     report.append(f"\n{'='*100}")
-    report.append("CONDITION COMPARISON (closedbook vs oracle vs local-docs)")
+    report.append(f"CONDITION COMPARISON — judge: {judge} (closedbook vs oracle vs local-docs)")
     report.append(f"{'='*100}")
 
     # Get all models across all harnesses
@@ -589,22 +624,21 @@ def main():
     args = parser.parse_args()
 
     data = load_data(GRADES_TSV)
-    harnesses = data["harnesses"]
+    combos = data["combos"]
     harness_data = data["harness_data"]
 
     report = []
     figures = []
 
     report.append(f"RuPropManagementEval — Analysis Report")
-    report.append(f"Harnesses: {', '.join(harnesses)}")
+    report.append(f"Judge × harness: {', '.join(f'{j} · {h}' for j, h in combos)}")
 
-    # Generate per-harness sections
-    for harness in harnesses:
-        _report_harness(harness_data[harness], harness, report, figures)
+    # Generate per-(judge, harness) sections
+    for judge, harness in combos:
+        _report_harness(harness_data[(judge, harness)], judge, harness, report, figures)
 
-    # Condition comparison if multiple harnesses
-    if len(harnesses) > 1:
-        _report_condition_comparison(harness_data, report)
+    # Condition comparison within each judge
+    _report_condition_comparison(harness_data, report)
 
     # --- Output ---
     output = "\n".join(report)
@@ -612,7 +646,7 @@ def main():
 
     if args.markdown:
         md_lines = ["# RuPropManagementEval — Analysis Report", ""]
-        md_lines.append(f"**Harnesses:** {', '.join(harnesses)}")
+        md_lines.append(f"**Judge × harness:** {', '.join(f'{j} · {h}' for j, h in combos)}")
         md_lines.append("")
         md_lines.append("```")
         md_lines.append(output)

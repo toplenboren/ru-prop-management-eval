@@ -15,6 +15,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from config import load_dataset, parse_config
+
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "data" / "dataset.tsv"
 RESULTS = ROOT / "results"
@@ -26,29 +28,22 @@ AGG_OUT = RESULTS / "grades.tsv"
 # Columns for grades_raw.tsv
 RAW_COLUMNS = [
     "model", "judge", "harness", "question_id", "run",
-    "total_awarded", "total_max", "hallucination_flag",
-    "factual_awarded", "factual_max",
-    "legal_grounding_awarded", "legal_grounding_max",
-    "completeness_awarded", "completeness_max",
-    "actionability_awarded", "actionability_max",
-    "confidence_awarded", "confidence_max",
-    "criteria_scores", "fixed_scores", "overall_comment", "elapsed_s",
+    "total_awarded", "total_max",
+    "task_completion", "legality", "factual_correctness",
+    "criteria_awarded", "criteria_max",
+    "criteria_scores", "flag_reasons", "overall_comment", "elapsed_s",
     "prompt_tokens", "completion_tokens", "total_tokens", "cost",
     "tool_calls", "tool_errors", "tool_latency_s", "tool_documents_touched",
 ]
 
 # Columns for grades.tsv (aggregated)
 AGG_COLUMNS = [
-    "model", "judge", "harness", "question_id", "category", "question", "n_runs",
+    "model", "judge", "harness", "question_id", "category", "intent", "knowledge", "question", "n_runs",
     "total_awarded_avg", "total_awarded_min", "total_awarded_max",
     "total_max_avg", "total_max_min", "total_max_max",
     "score_avg", "score_min", "score_max",
-    "pass_flag_avg", "hallucination_flag_avg",
-    "factual_avg", "factual_min", "factual_max",
-    "legal_grounding_avg", "legal_grounding_min", "legal_grounding_max",
-    "completeness_avg", "completeness_min", "completeness_max",
-    "actionability_avg", "actionability_min", "actionability_max",
-    "confidence_avg", "confidence_min", "confidence_max",
+    "pass_flag_avg", "task_completion_avg", "legality_avg", "factual_correctness_avg",
+    "criteria_avg", "criteria_min", "criteria_max",
     "criteria_scores",
     "prompt_tokens_avg", "prompt_tokens_min", "prompt_tokens_max",
     "completion_tokens_avg", "completion_tokens_min", "completion_tokens_max",
@@ -57,21 +52,6 @@ AGG_COLUMNS = [
     "elapsed_s_avg", "elapsed_s_min", "elapsed_s_max",
     "tool_calls_avg", "tool_errors_avg", "tool_latency_s_avg",
 ]
-
-
-def load_config(path: Path) -> dict[str, dict]:
-    with open(path, encoding="utf-8") as f:
-        return {json.loads(line)["name"]: json.loads(line) for line in f if line.strip()}
-
-
-def load_dataset(path: Path) -> dict[str, dict]:
-    with open(path, encoding="utf-8") as f:
-        return {r["id"]: r for r in csv.DictReader(f, delimiter="\t")}
-
-
-def load_jsonl(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
 
 
 def calc_cost(config: dict, usage: dict) -> float:
@@ -90,10 +70,7 @@ def match_model_name(stem: str, configs: dict[str, dict]) -> str | None:
     # Split harness suffix if present (model__harness_judge)
     if "__" in stem:
         base = stem.split("__", 1)[0]
-        for cfg_name in configs:
-            if base == cfg_name:
-                return cfg_name
-        return base
+        return base if base in configs else None
     for cfg_name in configs:
         if stem.startswith(cfg_name + "_"):
             return cfg_name
@@ -114,14 +91,9 @@ def parse_harness_from_stem(stem: str) -> str:
     return "closedbook"
 
 
-def parse_harness_from_answer(answer: dict) -> str:
-    """Extract harness from an answer record."""
-    return answer.get("harness", "closedbook")
-
-
 def collect_raw():
     """Collect all raw grade records with usage/cost data joined in."""
-    configs = load_config(CONFIG)
+    configs = {c["name"]: c for c in parse_config(CONFIG)}
     dataset = load_dataset(DATASET)
 
     grade_files = sorted(RESULTS.glob("*_*_grades.jsonl"))
@@ -139,10 +111,13 @@ def collect_raw():
 
         harness = parse_harness_from_stem(stem)
 
-        grades = load_jsonl(path)
-        # Answer file name matches the grades file name pattern
-        answers_path = RESULTS / f"{stem}_answers.jsonl"
-        answers = {a["id"]: a for a in load_jsonl(answers_path)} if answers_path.exists() else {}
+        grades = [json.loads(l) for l in path.read_text(encoding="utf-8").split("\n") if l.strip()]
+        # Answer file is named <model>[_​_harness]_answers.jsonl
+        answers_path = RESULTS / (
+            f"{model_name}__{harness}_answers.jsonl"
+            if harness != "closedbook" else f"{model_name}_answers.jsonl"
+        )
+        answers = {a["id"]: a for a in [json.loads(l) for l in answers_path.read_text(encoding="utf-8").split("\n") if l.strip()]} if answers_path.exists() else {}
         cfg = configs.get(model_name, {})
 
         for g in grades:
@@ -155,14 +130,7 @@ def collect_raw():
                 continue
             usage = ans.get("usage", {})
             tool_metrics = ans.get("tool_metrics", {})
-            
-            # Extract per-dimension scores from fixed scores
-            fixed_scores = g.get("scores_fixed", [])
-            dim_scores = {}
-            for s in fixed_scores:
-                dim = s.get("dimension", "")
-                dim_scores[dim] = (s.get("awarded", 0), s.get("max", 0))
-            
+
             raw_rows.append({
                 "model": g["model"],
                 "judge": g["judge"],
@@ -171,21 +139,15 @@ def collect_raw():
                 "run": g.get("run", 0),
                 "total_awarded": g["total_awarded"],
                 "total_max": g["total_max"],
-                "hallucination_flag": g.get("hallucination_flag", False),
-                "factual_awarded": g.get("factual_awarded", 0),
-                "factual_max": g.get("factual_max", 5),
-                "legal_grounding_awarded": dim_scores.get("legal_grounding", (0, 2))[0],
-                "legal_grounding_max": dim_scores.get("legal_grounding", (0, 2))[1],
-                "completeness_awarded": dim_scores.get("completeness", (0, 1))[0],
-                "completeness_max": dim_scores.get("completeness", (0, 1))[1],
-                "actionability_awarded": dim_scores.get("actionability", (0, 1))[0],
-                "actionability_max": dim_scores.get("actionability", (0, 1))[1],
-                "confidence_awarded": dim_scores.get("confidence", (0, 1))[0],
-                "confidence_max": dim_scores.get("confidence", (0, 1))[1],
-                "criteria_scores": json.dumps(g.get("scores_specific", g.get("scores", [])), ensure_ascii=False),
-                "fixed_scores": json.dumps(fixed_scores, ensure_ascii=False),
+                "task_completion": g.get("task_completion", True),
+                "legality": g.get("legality", True),
+                "factual_correctness": g.get("factual_correctness", True),
+                "criteria_awarded": g.get("criteria_awarded", 0),
+                "criteria_max": g.get("criteria_max", 5),
+                "criteria_scores": json.dumps(g.get("scores", []), ensure_ascii=False),
+                "flag_reasons": json.dumps(g.get("flag_reasons", {}), ensure_ascii=False),
                 "overall_comment": g.get("overall_comment", ""),
-                "elapsed_s": g.get("elapsed_s", 0),
+                "elapsed_s": ans.get("elapsed_s", 0),
                 "prompt_tokens": usage.get("prompt_tokens") or 0,
                 "completion_tokens": usage.get("completion_tokens") or 0,
                 "total_tokens": usage.get("total_tokens") or 0,
@@ -200,26 +162,29 @@ def collect_raw():
 
 
 def aggregate(raw_rows: list[dict], dataset: dict[str, dict]) -> list[dict]:
-    """Aggregate raw rows by (model, harness, question_id) with avg/min/max."""
-    groups: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
+    """Aggregate raw rows by (model, judge, harness, question_id) with avg/min/max."""
+    groups: dict[tuple[str, str, str, str], list[dict]] = defaultdict(list)
     for r in raw_rows:
-        groups[(r["model"], r["harness"], r["question_id"])].append(r)
+        groups[(r["model"], r["judge"], r["harness"], r["question_id"])].append(r)
 
     def dim_stats(runs, key):
         vals = [r[key] for r in runs]
         return sum(vals) / n, min(vals), max(vals)
 
     agg_rows = []
-    for (model, harness, qid), runs in groups.items():
+    for (model, judge, harness, qid), runs in groups.items():
         n = len(runs)
-        cat = dataset.get(qid, {}).get("category", "")
-        question = dataset.get(qid, {}).get("question", "")
+        ds_row = dataset.get(qid, {})
+        cat = ds_row.get("category", "")
+        question = ds_row.get("question", "")
 
         awarded = [r["total_awarded"] for r in runs]
         max_pts = [r["total_max"] for r in runs]
         scores = [a / m if m > 0 else 0 for a, m in zip(awarded, max_pts)]
         passes = [1 if s >= 0.5 else 0 for s in scores]
-        hallucs = [1 if r["hallucination_flag"] else 0 for r in runs]
+        task = [1 if r["task_completion"] else 0 for r in runs]
+        legal = [1 if r["legality"] else 0 for r in runs]
+        fc = [1 if r["factual_correctness"] else 0 for r in runs]
         pt = [r["prompt_tokens"] for r in runs]
         ct = [r["completion_tokens"] for r in runs]
         tt = [r["total_tokens"] for r in runs]
@@ -230,13 +195,8 @@ def aggregate(raw_rows: list[dict], dataset: dict[str, dict]) -> list[dict]:
         tl = [r["tool_latency_s"] for r in runs]
 
         # Per-dimension stats
-        f_avg, f_min, f_max = dim_stats(runs, "factual_awarded")
-        lg_avg, lg_min, lg_max = dim_stats(runs, "legal_grounding_awarded")
-        cp_avg, cp_min, cp_max = dim_stats(runs, "completeness_awarded")
-        ac_avg, ac_min, ac_max = dim_stats(runs, "actionability_awarded")
-        cf_avg, cf_min, cf_max = dim_stats(runs, "confidence_awarded")
+        cr_avg, cr_min, cr_max = dim_stats(runs, "criteria_awarded")
 
-        judge = runs[0]["judge"]
         criteria = runs[0]["criteria_scores"]
 
         agg_rows.append({
@@ -245,6 +205,8 @@ def aggregate(raw_rows: list[dict], dataset: dict[str, dict]) -> list[dict]:
             "harness": harness,
             "question_id": qid,
             "category": cat,
+            "intent": ds_row.get("intent", ""),
+            "knowledge": ds_row.get("knowledge", ""),
             "question": question,
             "n_runs": n,
             "total_awarded_avg": sum(awarded) / n,
@@ -257,12 +219,10 @@ def aggregate(raw_rows: list[dict], dataset: dict[str, dict]) -> list[dict]:
             "score_min": min(scores),
             "score_max": max(scores),
             "pass_flag_avg": sum(passes) / n,
-            "hallucination_flag_avg": sum(hallucs) / n,
-            "factual_avg": f_avg, "factual_min": f_min, "factual_max": f_max,
-            "legal_grounding_avg": lg_avg, "legal_grounding_min": lg_min, "legal_grounding_max": lg_max,
-            "completeness_avg": cp_avg, "completeness_min": cp_min, "completeness_max": cp_max,
-            "actionability_avg": ac_avg, "actionability_min": ac_min, "actionability_max": ac_max,
-            "confidence_avg": cf_avg, "confidence_min": cf_min, "confidence_max": cf_max,
+            "task_completion_avg": sum(task) / n,
+            "legality_avg": sum(legal) / n,
+            "factual_correctness_avg": sum(fc) / n,
+            "criteria_avg": cr_avg, "criteria_min": cr_min, "criteria_max": cr_max,
             "criteria_scores": criteria,
             "prompt_tokens_avg": sum(pt) / n,
             "prompt_tokens_min": min(pt),

@@ -82,8 +82,9 @@ data/*
 corpus
 corpus/*
 ./src/tools.py
-./propmpts/*
+./prompts/*
 !./prompts/judge.txt
+!./prompts/judge_user.txt
 !./prompts/system.txt
 docs
 ./docs/*

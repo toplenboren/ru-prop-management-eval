@@ -79,6 +79,7 @@
   "tip.cost": "тариф",
   "tip.free": "Фримиум-превью — реального тарифа пока нет",
   "tip.perm": "1M токенов ≈ {n} вопросов",
+  "tip.theme": "тёмная тема",
   "note.freemium": "* free: модель доступна только как <a href='https://developers.sber.ru/docs/ru/gigachat/tariffs/individual-tariffs' target='_blank' rel='noopener'>фримиум-превью</a>, реальной цены за токены пока нет",
   "cb.metric": "Метрика",
   "met.score_avg": "Балл",

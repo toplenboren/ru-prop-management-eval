@@ -11,8 +11,8 @@ This project is a toolkit for running experiments and evaluating LLMs on a curat
 
 ### Dataset
 
-- **Source**: Real questions from practicing propety managers taken from curated chats and communities. All questions are vetted and answered by an industry expert.
-- **Size**: 130 questions – see `data/dataset.tsv`.
+- **Source**: Real questions from practicing property managers taken from curated chats and communities. All questions are vetted and answered by an industry expert.
+- **Size**: 123 questions – see `data/dataset.tsv` (a small redacted sample is in `data/dataset.sample.tsv`). Dataset frozen as of October 2025; questions originate from non-public working chats, which bounds training-data contamination.
 - **Vetting protocol**: each question has an expert reference answer + a point-weighted rubric validated by expert.
 - **Classification**: each question is classified by domain, intent and whether practical experience is required to give a good answer, or just following Russian law gives an adequate answer.
 
@@ -22,7 +22,7 @@ Different libraries are used to make calls to LLM:
 - `openai` for OpenAI compatible APIs
 - `gigachat` for Gigachat family of models
 
-See `src/llm.py` for reference
+See `src/providers.py` for reference
 
 Models are configured in `llms_config.jsonl`
 
@@ -32,10 +32,10 @@ Judges are configured in `judges.jsonl`.
 
 ### Closed book evaluation
 
-1. Run all models listed in `llms_config.jsonl` against each question from `data/dataset.tsv` N times. All questions are ran with the same system prompt (`prompts/system.txt`) and without any additional context. This simulates a user going to a ChatGPT-style interface and asking the LLM. Thinking, and other params are configured per model in `llms_config.jsonl`.
+1. Run all models listed in `llms_config.jsonl` against each question from `data/dataset.tsv` N times. All questions are run with the same system prompt (`prompts/system.txt`) and without any additional context. This simulates a user going to a ChatGPT-style interface and asking the LLM. Thinking, and other params are configured per model in `llms_config.jsonl`.
 
 2. Firstly, run judge: config is in `judges.jsonl`, prompt is in `prompts/judge.txt`. After running, score each answer on a two-layer rubric:
-    1. **Question-specific criteria** (5 pts, normalized from per-question `dynamic_rubric`): How good is the answer? Does in include necessary details? This score is different for each item in `data/dataset.tsv`
+    1. **Question-specific criteria** (5 pts, normalized from per-question `dynamic_rubric`): How good is the answer? Does it include necessary details? This score is different for each item in `data/dataset.tsv`
     2. **Flags** 
     - `task_completion` — the answer addresses the question at all
     - `legality` — the advice complies with Russian Federation law and is safe to follow;
@@ -53,7 +53,7 @@ Closed-book evaluation, 123 questions, judged by jev (deterministic typed judge,
 
 ### Main findings
 
-- **For closed-book use, pick a cheap frontier model or the best GigaChat.** `gpt-5.6-sol·nr` leads at 52.7%; `GigaChat-3-Ultra` is the best Russian model at 44.9% — and was effectively free under its freemium quota.
+- **For closed-book use, pick a cheap frontier model or the best GigaChat.** `gpt-5.6-sol·nr` leads at 52.7%; `deepseek-v4.1-flash·nr` is the best value pick at 49.1% for 0.16₽/q; `GigaChat-3-Ultra` is the best Russian model at 44.9% — and was effectively free under its freemium quota.
 - **No model is production-ready closed-book.** Best score is ~53%; a harness (retrieval over real legal docs / expert references) is needed for production use.
 - **Models are good at safe-ish answers** — legality scores are consistently higher than factual correctness. The risk is confident-sounding advice built on wrong citations, not overtly illegal suggestions.
 - **Reasoning buys ~2-3 points for 2-4× the tokens** — noreason variants are the cost-efficient pick.
@@ -61,8 +61,12 @@ Closed-book evaluation, 123 questions, judged by jev (deterministic typed judge,
 | Model | Score | Illegal answers | Factually incorrect | ₽/question |
 |---|---|---|---|---|
 | openrouter-gpt-5.6-sol·nr | **52.7%** | 2 | 7 | 1.15₽ |
+| openrouter-deepseek-v4.1-flash·nr | 49.1% | 7 | 13 | 0.16₽ |
+| openrouter-deepseek-v4-pro | 46.2%* | 15 | 24 | 0.13₽ |
 | GigaChat-3-Ultra | 44.9% | 20 | 20 | 0.00₽* |
 | openrouter-gpt-6-luna | 44.7% | 4 | 4 | 0.11₽ |
+| openrouter-glm-5.3-flash | 43.3% | 15 | 25 | 0.04₽ |
+| openrouter-minimax-m3 | 43.1% | 22 | 33 | 0.19₽ |
 | openrouter-gpt-6-luna·nr | 42.5% | 5 | 9 | 0.04₽ |
 | openrouter-claude-haiku-5.5 | 41.7% | 3 | 10 | 0.15₽ |
 | qwen3.6-35b-a3b | 40.6% | 15 | 34 | 0.16₽ |
@@ -79,7 +83,7 @@ Closed-book evaluation, 123 questions, judged by jev (deterministic typed judge,
 | yandexgpt-5.1 | 21.6% | 28 | 30 | 0.32₽ |
 | yandexgpt-lite | 18.0% | 39 | 54 | 0.08₽ |
 
-Counts are out of 123 questions. *GigaChat-3-Ultra cost = 0 under freemium quota; GigaChat-3-Pro is n=116 (7 questions lost to rate limits). OpenRouter costs converted at 85₽/USD.
+Counts are out of 123 questions. *GigaChat-3-Ultra cost = 0 under freemium quota; GigaChat-3-Pro is n=116 (7 questions lost to rate limits); deepseek-v4-pro is n=121 (2 answers lost to empty provider responses). OpenRouter costs converted at 85₽/USD.
 
 ### Answer quality by model
 

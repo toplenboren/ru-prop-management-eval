@@ -46,7 +46,7 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.*
-!env.example
+!.env.example
 *.key
 secrets/
 
@@ -70,11 +70,15 @@ results/*.json
 # Logs
 *.log
 
+# Working notes
+TODO.md
+
 # Devin local secrets
 .devin/secrets.env
 
 # Private data
 data/*
+!data/dataset.tsv
 !data/dataset.sample.tsv
 !data/LICENSE
 
@@ -86,5 +90,3 @@ corpus/*
 !./prompts/judge.txt
 !./prompts/judge_user.txt
 !./prompts/system.txt
-docs
-./docs/*

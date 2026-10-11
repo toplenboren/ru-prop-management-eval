@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LLM Benchmark: ЖКХ</title>
+<script>document.documentElement.dataset.bsTheme = localStorage.getItem('ev_theme') ||
+  (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');</script>
 <link href="vendor/bootstrap.min.css" rel="stylesheet">
 <link href="vendor/dataTables.bootstrap5.css" rel="stylesheet">
 <link href="style.css" rel="stylesheet">
@@ -20,6 +22,7 @@
         </a>
         <button class="lang-btn" data-lang="en">EN</button>
         <button class="lang-btn" data-lang="ru">RU</button>
+        <button class="lang-btn" id="themeBtn" title="theme">🌙</button>
       </div>
     </div>
     <div class="hero-body text-center">
@@ -187,10 +190,10 @@
         </div>
         <div class="row">
           <div class="col-md-6">
-            <h6 data-i18n="m.expert">Expert answer</h6><p id="dmExpert" class="answer-text small border rounded p-2 bg-light"></p>
+            <h6 data-i18n="m.expert">Expert answer</h6><p id="dmExpert" class="answer-text small border rounded p-2 bg-body-tertiary"></p>
           </div>
           <div class="col-md-6">
-            <h6 data-i18n="m.rubric">Rubric</h6><div id="dmRubric" class="answer-text small border rounded p-2 bg-light"></div>
+            <h6 data-i18n="m.rubric">Rubric</h6><div id="dmRubric" class="answer-text small border rounded p-2 bg-body-tertiary"></div>
           </div>
         </div>
         <hr>

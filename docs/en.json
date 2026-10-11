@@ -79,6 +79,7 @@
   "tip.cost": "price",
   "tip.free": "Freemium preview — no real pricing yet",
   "tip.perm": "1M tokens ≈ {n} questions",
+  "tip.theme": "toggle dark theme",
   "note.freemium": "* free: this model is only available as a <a href='https://developers.sber.ru/docs/ru/gigachat/tariffs/individual-tariffs' target='_blank' rel='noopener'>freemium preview</a> right now, so there is no real per-token price to compute",
   "cb.metric": "Metric",
   "met.score_avg": "Score",

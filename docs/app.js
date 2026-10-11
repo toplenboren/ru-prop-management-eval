@@ -21,7 +21,9 @@ const setHash = o => {
   history.replaceState(null, '', p.size ? '#' + p : location.pathname);
 };
 
-let LANG = localStorage.getItem('ev_lang') || ((navigator.language || '').startsWith('ru') ? 'ru' : 'en');
+const defLang = () => ((navigator.language || '').startsWith('ru') ? 'ru' : 'en');
+let LANG = localStorage.getItem('ev_lang');
+if (!['en', 'ru'].includes(LANG)) LANG = defLang();
 let STR = {};
 const t = k => STR[k] ?? k;
 const tf = (k, o) => t(k).replace(/\{(\w+)\}/g, (_, m) => o[m] ?? m);
@@ -79,8 +81,19 @@ const metricsOf = m => {
 };
 
 // brand-ish color per vendor group — makes groups easy to tell apart
-const VENDOR_COLORS = { 'Sber': '#21a038', 'Yandex': '#fc3f1d', 'OpenAI': '#0f0f0f',
+const VENDOR_COLORS = { 'Sber': '#21a038', 'Yandex': '#fc3f1d', 'OpenAI': '#10a37f',
                         'Anthropic': '#d97757', 'Open weights': '#8b5cf6' };
+
+// ---------- theme ----------
+let THEME = document.documentElement.dataset.bsTheme || 'light';
+function applyTheme(theme, persist = true) {
+  THEME = theme;
+  document.documentElement.dataset.bsTheme = theme;
+  if (persist) localStorage.setItem('ev_theme', theme);
+  const b = $('#themeBtn'); if (b) b.textContent = theme === 'dark' ? '☀️' : '🌙';
+  Chart.defaults.color = theme === 'dark' ? '#9aa3ad' : '#666666';
+  Chart.defaults.borderColor = theme === 'dark' ? 'rgba(255,255,255,.12)' : 'rgba(0,0,0,.1)';
+}
 
 // draws point labels (e.g. model names) next to scatter dots
 const VENDORS = ['Sber', 'Yandex', 'OpenAI', 'Anthropic', 'Open weights'];
@@ -450,7 +463,7 @@ function draw(id, cfg) { charts[id]?.destroy(); charts[id] = new Chart($('#' + i
 // ---------- init ----------
 (async () => {
   const h = getHash();
-  if (h.lang) LANG = h.lang;
+  if (['en', 'ru'].includes(h.lang)) LANG = h.lang;
   const [mf, gt, ds, str, cfg] = await Promise.all([
     fetch('data/manifest.json').then(r => r.json()),
     fetch('data/grades.tsv').then(r => r.text()),
@@ -482,7 +495,13 @@ function draw(id, cfg) { charts[id]?.destroy(); charts[id] = new Chart($('#' + i
     renderModelCharts();
     dtModels.clear().rows.add(filteredRows()).draw();
   });
-  document.querySelectorAll('.lang-btn').forEach(b => {
+  applyTheme(THEME, false);
+  $('#themeBtn').title = t('tip.theme');
+  $('#themeBtn').onclick = () => {
+    applyTheme(THEME === 'dark' ? 'light' : 'dark');
+    renderModelCharts(); drawBuilder();
+  };
+  document.querySelectorAll('.lang-btn[data-lang]').forEach(b => {
     b.classList.toggle('active', b.dataset.lang === LANG);
     b.onclick = () => { localStorage.setItem('ev_lang', b.dataset.lang); setHash({ lang: b.dataset.lang }); location.reload(); };
   });

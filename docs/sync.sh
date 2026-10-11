@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copies eval results into web/data so the site is self-contained for static hosting.
+# Copies eval results into docs/data so the site is self-contained for static hosting.
 set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 D="$(cd "$(dirname "$0")" && pwd)/data"
